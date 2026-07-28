@@ -16,14 +16,14 @@
   "use strict";
 
   const BANNED_LIST_URL = "https://loyce.club/bans/usernames.txt";
-  const SIGBAN_LIST_URL = "https://loyce.club/bans/sigbans.html";
+  const SIGBAN_LIST_URL = "https://loyce.club/bans/sigbanned.html";
   const CACHE_BANNED_DATA = "bannedUsersData";
-  const CACHE_SIGBAN_DATA = "sigbannedUsersData";
+  const CACHE_SIGBANNED_DATA = "sigbannedUsersData";
   const CACHE_KEY_TIMESTAMP = "bannedUsersTimestamp";
   const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // cache for 1 day  (24 hours)
 
   let bannedUsers = [];
-  let sigBanUsers = [];
+  let sigBannedUsers = [];
   let scriptError = false;
 
   const parseBannedUsers = (text) => {
@@ -49,7 +49,61 @@
   };
 
   const parseSigBannedUsers = (html) => {
-    consol.log(html, "sigban raw");
+    if (!html) return [];
+    const users = [];
+    const decoder = document.createElement("textarea");
+
+    const decodeHtml = (text) => {
+      decoder.innerHTML = text;
+      console.log("Bitcointalk Ban Checker: Decoded HTML text:", decoder);
+      return decoder.value.trim();
+    };
+
+    // One pass: capture userId, username, and tail content per record
+    const rowRegex =
+      /(?:^|<br\s*\/?>)\s*(?:<font[^>]*>\s*\d+\.\s*<\/font>\s*)?(\d+)\s*:\s*<a[^>]*action=profile;u=\d+[^>]*>([^<]+)<\/a>([\s\S]*?)(?=<br\s*\/?>|$)/gi;
+
+    let rowMatch;
+    while ((rowMatch = rowRegex.exec(html)) !== null) {
+      const userId = rowMatch[1];
+      const username = decodeHtml(rowMatch[2]);
+      const tail = rowMatch[3] || "";
+
+      // Track latest event and latest date (ISO yyyy-mm-dd is lexicographically sortable)
+      let latestEventStatus = "active";
+      let latestEventDate = null;
+      let latestAnyDate = null;
+
+      const dateRegex = /\((\d{4}-\d{2}-\d{2})\)/g;
+      let d;
+      while ((d = dateRegex.exec(tail)) !== null) {
+        const dt = d[1];
+        if (!latestAnyDate || dt >= latestAnyDate) latestAnyDate = dt;
+      }
+
+      const eventRegex =
+        /(applied|removed)(?:\s|<[^>]+>|&nbsp;)*\((\d{4}-\d{2}-\d{2})\)/gi;
+      let e;
+      while ((e = eventRegex.exec(tail)) !== null) {
+        const action = e[1].toLowerCase();
+        const dt = e[2];
+
+        // If same date repeats, keep the later occurrence in text order
+        if (!latestEventDate || dt >= latestEventDate) {
+          latestEventDate = dt;
+          latestEventStatus = action === "removed" ? "removed" : "active";
+        }
+      }
+
+      users.push({
+        userId,
+        username,
+        status: latestEventDate ? latestEventStatus : "active",
+        date: latestEventDate || latestAnyDate || null,
+      });
+    }
+
+    return users;
   };
 
   const applyBan = () => {
@@ -63,6 +117,7 @@
     console.log(
       `Bitcointalk Ban Checker: Applying Ban on ${bannedUsers.length} banned users.`,
     );
+
     const currentUrl = window.location.href;
     const isProfilePage = currentUrl.includes("action=profile");
     const isThreadPage = currentUrl.includes("topic=");
@@ -223,6 +278,13 @@
     }
   }; //end applyBan
 
+  const applySigBan = () => {
+    if (scriptError || sigBannedUsers.length === 0) {
+      console.log("Bitcointalk Ban Checker: No sigbanned users to check.");
+      return;
+    }
+  };
+
   /**
    * CustomHeaders class to create headers for GM_xmlhttpRequest
    * @param {string} accept
@@ -231,7 +293,7 @@
    */
   //Modified options
   class HttpRequestOptions {
-    constructor(accept, referer, handler) {
+    constructor(accept, referer, url, handler) {
       this.method = "GET";
       this.headers = {
         "User-Agent": "UserScript/1.0",
@@ -240,7 +302,8 @@
         Referer: referer ?? "https://bitcointalk.org/",
       };
       this.timeout = 5000;
-      Object.assign(this, handlers);
+      this.url = url;
+      Object.assign(this, handler);
     }
   }
 
@@ -254,6 +317,7 @@
     const requestOptions = new HttpRequestOptions(
       "text/plain",
       "https://bitcointalk.org/",
+      BANNED_LIST_URL,
       {
         onload: (response) => {
           if (response.status >= 200 && response.status < 300) {
@@ -275,7 +339,7 @@
           }
         },
 
-        onerrorx: (error) => {
+        onerror: (error) => {
           console.error(
             "Bitcointalk Ban Checker: Network error fetching banned users list.",
             error,
@@ -293,17 +357,18 @@
     const requestOptions = new HttpRequestOptions(
       "text/html",
       "https://bitcointalk.org/",
+      SIGBAN_LIST_URL,
       {
         onload: (response) => {
           if (response.status >= 200 && response.status < 300) {
-            const fetchedhtml = response.responseText;
-            sigBannedUsers = parseSigBannedUsers(fetchedhtml);
-            // GM_setValue(CACHE_BANNED_DATA, fetchedhtml); // Store raw text
-            // GM_setValue(CACHE_KEY_TIMESTAMP, Date.now());
-            // console.log(
-            //   `Bitcointalk Ban Checker: Successfully fetched and cached ${sigBannedUsers.length} sigban users.`,
-            // );
-            // applySigBan();
+            const fetchedHtmlText = response.responseText;
+            sigBannedUsers = parseSigBannedUsers(fetchedHtmlText);
+            GM_setValue(CACHE_SIGBANNED_DATA, fetchedHtmlText); // Store raw text
+            GM_setValue(CACHE_KEY_TIMESTAMP, Date.now());
+            console.log(
+              `Bitcointalk Ban Checker: Successfully fetched and cached ${sigBannedUsers.length} sigbanned users.`,
+            );
+            applySigBan();
           } else {
             console.error(
               `Bitcointalk Ban Checker: Failed to fetch sigBan list. Status: ${response.status}`,
@@ -314,7 +379,7 @@
           }
         },
 
-        onerrorx: (error) => {
+        onerror: (error) => {
           console.error(
             "Bitcointalk Ban Checker: Network error fetching sigban list.",
             error,
@@ -329,27 +394,38 @@
 
   /* --- Main Script Execution ---*/
   const cachedTimestamp = GM_getValue(CACHE_KEY_TIMESTAMP, 0);
-  const cachedData = GM_getValue(CACHE_BANNED_DATA, null);
+  const cachedBannedData = GM_getValue(CACHE_BANNED_DATA, null);
+  const cachedSigbanData = GM_getValue(CACHE_SIGBANNED_DATA, null);
   const now = Date.now();
 
-  if (cachedData && now - cachedTimestamp < CACHE_DURATION_MS) {
+  if (
+    cachedBannedData &&
+    cachedSigbanData &&
+    now - cachedTimestamp < CACHE_DURATION_MS
+  ) {
     console.log("Bitcointalk Ban Checker: Using cached banned users list.");
-    bannedUsers = parseBannedUsers(cachedData);
+    bannedUsers = parseBannedUsers(cachedBannedData);
+    sigBannedUsers = parseSigBannedUsers(cachedSigbanData);
     applyBan();
   } else {
-    if (cachedData) {
+    if (cachedBannedData || cachedSigbanData) {
       console.log(
         "Bitcointalk Ban Checker: Cache expired, fetching new banned users list.",
       );
       // Use stale data immediately while fetching in background
-      bannedUsers = parseBannedUsers(cachedData);
+      bannedUsers = parseBannedUsers(cachedBannedData);
+      sigBannedUsers = parseSigBannedUsers(cachedSigbanData);
       applyBan();
-      fetchAndCacheBannedList(); // Fetch new list in background
+      fetchAndCacheBannedList();
+      fetchandCacheSigbanList(); // Fetch new list in background
+      applyBan(); // Re-apply after fetching new data
     } else {
       console.log(
         "Bitcointalk Ban Checker: No cache found, fetching banned users list.",
       );
-      fetchAndCacheBannedList(); // Fetch list
+      fetchAndCacheBannedList();
+      fetchandCacheSigbanList(); // Fetch sigban list
+      applyBan(); // Apply after fetching new data
     }
   }
 })();
