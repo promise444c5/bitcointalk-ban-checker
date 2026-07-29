@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bitcointalk Banned Users Checker
-// @namespace    http://tampermonkey.net/
-// @version      1.1
+// @namespace    https://greasyfork.org/users/1613258
+// @version      2.0
 // @description  Checks if a user is banned on Bitcointalk.
 // @author       promise444c5
 // @match        https://bitcointalk.org/index.php?action=profile*
@@ -347,13 +347,413 @@
     );
   };
 
+  /* --- Modal for displaying banned and sigbanned users --- */
+  const MODAL_STYLE_ID = "bitcointalk-modal-style";
+  const MODAL_ID = "bitcointalk-status-modal";
+
+  const ensureModalStyles = () => {
+    if (document.getElementById(MODAL_STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = MODAL_STYLE_ID;
+    style.textContent = `
+      :root {
+        --bt-modal-primary: #375f82;
+        --bt-modal-primary-dark: #27445d;
+        --bt-modal-primary-soft: #dbe7f1;
+        --bt-modal-surface: #f7fbfe;
+        --bt-modal-surface-alt: #eef4f8;
+        --bt-modal-border: #c3d2de;
+        --bt-modal-text: #173042;
+        --bt-modal-muted: #5b7284;
+      }
+
+      .bt-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(23, 48, 66, 0.72);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+        padding: 16px;
+      }
+
+      .bt-modal {
+        width: min(920px, 100%);
+        max-height: min(85vh, 900px);
+        background: linear-gradient(180deg, #ffffff 0%, var(--bt-modal-surface) 100%);
+        border: 1px solid var(--bt-modal-border);
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(23, 48, 66, 0.28);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .bt-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 20px;
+        background: linear-gradient(135deg, var(--bt-modal-primary), #4e7c9f 72%, #6f95b4);
+        border-bottom: 1px solid var(--bt-modal-primary-dark);
+      }
+
+      .bt-modal-title {
+        font-size: 16px;
+        font-weight: 800;
+        color: #f8fcff;
+      }
+
+      .bt-modal-close {
+        border: 0;
+        background: rgba(255, 255, 255, 0.16);
+        color: #ffffff;
+        border-radius: 999px;
+        width: 34px;
+        height: 34px;
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .bt-modal-close:hover {
+        background: rgba(255, 255, 255, 0.26);
+      }
+
+      .bt-modal-tabs {
+        display: flex;
+        gap: 8px;
+        padding: 12px 16px 0;
+        background: var(--bt-modal-surface);
+        border-bottom: 1px solid var(--bt-modal-border);
+      }
+
+      .bt-modal-tab {
+        border: 1px solid var(--bt-modal-border);
+        background: #ffffff;
+        color: var(--bt-modal-text);
+        border-radius: 999px;
+        padding: 8px 14px;
+        cursor: pointer;
+        font-weight: 700;
+        margin-bottom: 2px;
+      }
+
+      .bt-modal-tab.is-active {
+        background: var(--bt-modal-primary);
+        color: #ffffff;
+        border-color: var(--bt-modal-primary);
+      }
+
+      .bt-modal-body {
+        overflow: auto;
+        padding: 16px 20px 20px;
+      }
+
+      .bt-modal-panel {
+        display: none;
+      }
+
+      .bt-modal-panel.is-active {
+        display: block;
+      }
+
+      .bt-section {
+        margin-bottom: 18px;
+      }
+
+      .bt-section:last-child {
+        margin-bottom: 0;
+      }
+
+      .bt-section-title {
+        margin: 0 0 10px;
+        font-size: 14px;
+        font-weight: 800;
+        color: var(--bt-modal-text);
+      }
+
+      .bt-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+      }
+
+      .bt-item {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border: 1px solid var(--bt-modal-border);
+        border-radius: 10px;
+        background: #ffffff;
+      }
+
+      .bt-item-main {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .bt-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .bt-pill.banned {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      .bt-pill.sig-active {
+        background: #fef3c7;
+        color: #92400e;
+      }
+
+      .bt-pill.sig-removed {
+        background: #e5e7eb;
+        color: #374151;
+      }
+
+      .bt-meta {
+        color: var(--bt-modal-muted);
+        font-size: 12px;
+      }
+
+      .bt-empty {
+        color: var(--bt-modal-muted);
+        font-style: italic;
+        padding: 10px 0;
+      }
+
+      .bt-modal-open-btn {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 999998;
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 14px;
+        background: linear-gradient(135deg, var(--bt-modal-primary), #4e7c9f);
+        color: #ffffff;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(23, 48, 66, 0.24);
+      }
+
+      .bt-modal-open-btn:hover {
+        background: linear-gradient(135deg, var(--bt-modal-primary-dark), #406784);
+      }
+    `;
+    document.head.appendChild(style);
+  }; //end of ensureModalStyles
+
+  const sortByDateDesc = (items) => {
+    return [...items].sort((a, b) =>
+      (b.date || "").localeCompare(a.date || ""),
+    );
+  };
+
+  const formatDate = (date) => date || "unknown date";
+
+  /* Create the modal structure and return the backdrop element */
+  const createStatusModal = () => {
+    ensureModalStyles();
+
+    let backdrop = document.getElementById(MODAL_ID);
+    if (backdrop) return backdrop;
+
+    backdrop = document.createElement("div");
+    backdrop.id = MODAL_ID;
+    backdrop.className = "bt-modal-backdrop";
+
+    backdrop.innerHTML = `
+      <div class="bt-modal" role="dialog" aria-modal="true" aria-labelledby="bt-modal-title">
+        <div class="bt-modal-header">
+          <div class="bt-modal-title" id="bt-modal-title">Latest Ban Logs</div>
+          <button class="bt-modal-close" type="button" aria-label="Close modal">×</button>
+        </div>
+
+        <div class="bt-modal-tabs">
+          <button class="bt-modal-tab is-active" type="button" data-tab="banned">Banned</button>
+          <button class="bt-modal-tab" type="button" data-tab="sigbanned">Sigbanned</button>
+        </div>
+
+        <div class="bt-modal-body">
+          <div class="bt-modal-panel is-active" data-panel="banned"></div>
+          <div class="bt-modal-panel" data-panel="sigbanned"></div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(backdrop);
+
+    const closeModal = () => {
+      backdrop.style.display = "none";
+    };
+
+    backdrop
+      .querySelector(".bt-modal-close")
+      .addEventListener("click", closeModal);
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) closeModal();
+    });
+
+    backdrop.querySelectorAll(".bt-modal-tab").forEach((tabButton) => {
+      tabButton.addEventListener("click", () => {
+        const tabName = tabButton.dataset.tab;
+
+        backdrop.querySelectorAll(".bt-modal-tab").forEach((button) => {
+          button.classList.toggle("is-active", button === tabButton);
+        });
+
+        backdrop.querySelectorAll(".bt-modal-panel").forEach((panel) => {
+          panel.classList.toggle("is-active", panel.dataset.panel === tabName);
+        });
+      });
+    });
+
+    return backdrop;
+  }; //end of createStatusModal
+
+  /* Render the banned users panel in the modal */
+  const renderBannedModalPanel = () => {
+    const modal = createStatusModal();
+    const panel = modal.querySelector('[data-panel="banned"]');
+    const bannedItems = []; // to be added in future
+
+    panel.innerHTML = `
+      <div class="bt-section">
+        <h3 class="bt-section-title">Banned Users</h3>
+        ${
+          bannedItems.length
+            ? `
+              <ul class="bt-list">
+                ${bannedItems
+                  .map(
+                    (user) => `
+                    <a href="https://bitcointalk.org/index.php?action=profile;u=${user.userId}" target="_blank" rel="noopener noreferrer " class="bt-item">
+                        <div class="bt-item-main">
+                          <span class="bt-pill banned">Banned</span>
+                          <strong>${user.username}</strong>
+                        </div>
+                        <div class="bt-meta">${user.userId} • ${formatDate(user.date)}</div>
+                      </a>
+                    `,
+                  )
+                  .join("")}
+              </ul>
+            `
+            : `<div class="bt-empty">No Available logs for now.. You can check the full list on <a href="https://loyce.club/bans/banned.html" target="_blank" rel="noopener noreferrer"><span class="bt-pill" style="text-decoration: underline;">Loyce Club</span></a></div>`
+        }
+      </div>
+    `;
+  }; //end of renderBannedModalPanel
+
+  /* Render the sigbanned users panel in the modal */
+  const renderSigbannedModalPanel = () => {
+    const modal = createStatusModal();
+    const panel = modal.querySelector('[data-panel="sigbanned"]');
+
+    const activeSigbans = sortByDateDesc(
+      sigBannedUsers.filter((user) => user.status === "active"),
+    ).slice(0, 15);
+
+    const removedSigbans = sortByDateDesc(
+      sigBannedUsers.filter((user) => user.status === "removed"),
+    ).slice(0, 5);
+
+    panel.innerHTML = `
+      <div class="bt-section">
+        <h3 class="bt-section-title">Sigbanned Users</h3>
+        ${
+          activeSigbans.length
+            ? `
+              <ul class="bt-list">
+                ${activeSigbans
+                  .map(
+                    (user) => `
+                    <a href="https://bitcointalk.org/index.php?action=profile;u=${user.userId}" target="_blank" rel="noopener" class="bt-item">
+                        <div class="bt-item-main">
+                          <span class="bt-pill sig-active">Active</span>
+                          <strong>${user.username}</strong>
+                        </div>
+                        <div class="bt-meta">${user.userId} • ${formatDate(user.date)}</div>
+                      </a>
+                    `,
+                  )
+                  .join("")}
+              </ul>
+            `
+            : `<div class="bt-empty">No active sigbanned users available.</div>`
+        }
+      </div>
+
+      <div class="bt-section">
+        <h3 class="bt-section-title">Removed Sigbans</h3>
+        ${
+          removedSigbans.length
+            ? `
+              <ul class="bt-list">
+                ${removedSigbans
+                  .map(
+                    (user) => `
+                    <a href="https://bitcointalk.org/index.php?action=profile;u=${user.userId}" target="_blank" rel="noopener" class="bt-item">
+                        <div class="bt-item-main">
+                          <span class="bt-pill sig-removed">Removed</span>
+                          <strong>${user.username}</strong>
+                        </div>
+                        <div class="bt-meta">${user.userId} • ${formatDate(user.date)}</div>
+                      </a>
+                    `,
+                  )
+                  .join("")}
+              </ul>
+              <div class="bt-meta" style="margin-top: 8px; font-size: 12px;">Note: Only the latest 15 sigbans & 5 latest removed sigbans are shown.. To see more  visit <a href="https://loyce.club/bans/sigbanned.html" target="_blank" rel="noopener noreferrer"><span class="bt-pill" style="text-decoration: underline;">Loyce Club</span></a> or <a href="https://bitlist.co/analytics/sigbanned" target="_blank" rel="noopener noreferrer"><span class="bt-pill" style="text-decoration: underline;">BitList</span></a></div>
+            `
+            : `<div class="bt-empty">No removed sigbanned users available.</div>`
+        }
+      </div>
+    `;
+  }; //end of renderSigbannedModalPanel
+
+  /* Open the status modal and render both panels */
+  const openStatusModal = () => {
+    const modal = createStatusModal();
+    renderBannedModalPanel();
+    renderSigbannedModalPanel();
+    modal.style.display = "flex";
+  };
+
+  const addStatusModalButton = () => {
+    ensureModalStyles();
+    if (document.querySelector(".bt-modal-open-btn")) return;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "bt-modal-open-btn";
+    button.textContent = "Latest Ban Logs";
+    button.addEventListener("click", openStatusModal);
+    document.body.appendChild(button);
+  }; //end of addStatusModalButton
+
   /**
    * CustomHeaders class to create headers for GM_xmlhttpRequest
-   * @param {string} accept
-   * @param {string} referer
-   * @returns {object} headers
    */
-  //Modified options
   class HttpRequestOptions {
     constructor(accept, referer, url, handler) {
       this.method = "GET";
@@ -497,4 +897,5 @@
       applySigBan(); // Apply after fetching new data
     }
   }
+  addStatusModalButton();
 })();
