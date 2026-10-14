@@ -330,8 +330,9 @@
   };
 
   const applySigBan = () => {
+    const activeSigbans = sigBannedUsers.filter((user) => user.status === "active");
     applyUserStatus(
-      sigBannedUsers,
+      activeSigbans,
       {
         name: "sigbanned",
         statusKey: "sigbanned",
@@ -675,7 +676,7 @@
 
     const removedSigbans = sortByDateDesc(
       sigBannedUsers.filter((user) => user.status === "removed"),
-    ).slice(0, 5);
+    ).slice(0, 10);
 
     panel.innerHTML = `
       <div class="bt-section">
@@ -723,7 +724,7 @@
                   )
                   .join("")}
               </ul>
-              <div class="bt-meta" style="margin-top: 8px; font-size: 12px;">Note: Only the latest 15 sigbans & 5 latest removed sigbans are shown.. To see more  visit <a href="https://loyce.club/bans/sigbanned.html" target="_blank" rel="noopener noreferrer"><span class="bt-pill" style="text-decoration: underline;">Loyce Club</span></a> or <a href="https://bitlist.co/analytics/sigbanned" target="_blank" rel="noopener noreferrer"><span class="bt-pill" style="text-decoration: underline;">BitList</span></a></div>
+              <div class="bt-meta" style="margin-top: 8px; font-size: 12px;">Note: Only the latest 15 sigbans & 10 latest removed sigbans are shown.. To see more  visit <a href="https://loyce.club/bans/sigbanned.html" target="_blank" rel="noopener noreferrer"><span class="bt-pill" style="text-decoration: underline;">Loyce Club</span></a> or <a href="https://bitlist.co/analytics/sigbanned" target="_blank" rel="noopener noreferrer"><span class="bt-pill" style="text-decoration: underline;">BitList</span></a></div>
             `
             : `<div class="bt-empty">No removed sigbanned users available.</div>`
         }
