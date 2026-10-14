@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Bitcointalk Banned Users Checker
 // @namespace    https://greasyfork.org/users/1613258
-// @version      2.0
+// @version      2.0.1
 // @description  Checks if a user is banned on Bitcointalk.
 // @author       promise444c5
 // @match        https://bitcointalk.org/index.php?action=profile*
